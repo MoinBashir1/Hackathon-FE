@@ -110,6 +110,8 @@ function App() {
     };
   };
 
+  
+
   const startAudioProcessing = async () => {
     try {
       audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
