@@ -1,0 +1,84 @@
+.app {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+  font-family: Arial, sans-serif;
+  text-align: center;
+}
+
+.connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 50px;
+}
+
+.connect-form input {
+  padding: 10px;
+  font-size: 16px;
+}
+
+.connect-form button {
+  padding: 10px;
+  font-size: 16px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+.call-container {
+  margin-top: 30px;
+}
+
+.status {
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.my-number {
+  margin-bottom: 20px;
+}
+
+.call-form {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.call-form input {
+  flex-grow: 1;
+  padding: 10px;
+  font-size: 16px;
+}
+
+.call-button, .answer-button {
+  padding: 10px 20px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.reject-button, .end-call-button {
+  padding: 10px 20px;
+  background-color: #f44336;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  margin-left: 10px;
+}
+
+.incoming-call {
+  margin: 20px 0;
+}
+
+.audio-containers {
+  display: none; /* Hide audio elements, we just need them for the streams */
+}
+
+.fas {
+  margin-right: 5px;
+}
