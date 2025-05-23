@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import './App.css';
 
 // Supported languages
 const LANGUAGES = [
@@ -19,38 +18,80 @@ function App() {
   const [remoteLanguage, setRemoteLanguage] = useState('en-US');
   
   const ws = useRef(null);
-  const localAudioRef = useRef(null);
-  const remoteAudioRef = useRef(null);
-  const pc = useRef(null);
-  const localStream = useRef(null);
-  const mediaRecorder = useRef(null);
   const audioContext = useRef(null);
-  const audioBufferSource = useRef(null);
+  const mediaStream = useRef(null);
+  const sourceNode = useRef(null);
+  const processorNode = useRef(null);
 
   useEffect(() => {
     return () => {
-      if (ws.current) {
-        ws.current.close();
-      }
-      if (pc.current) {
-        pc.current.close();
-      }
-      if (localStream.current) {
-        localStream.current.getTracks().forEach(track => track.stop());
-      }
-      if (mediaRecorder.current) {
-        mediaRecorder.current.stop();
-      }
-      if (audioContext.current) {
-        audioContext.current.close();
-      }
+      cleanup();
     };
   }, []);
+
+  // Cleanup function to close audio context and stop media stream safely
+  const cleanup = () => {
+    if (processorNode.current) {
+      processorNode.current.disconnect();
+      processorNode.current.onaudioprocess = null;
+      processorNode.current = null;
+    }
+
+    if (sourceNode.current) {
+      sourceNode.current.disconnect();
+      sourceNode.current = null;
+    }
+
+    if (audioContext.current) {
+      audioContext.current.close().catch(() => {
+        // ignore errors if already closed
+      });
+      audioContext.current = null;
+    }
+
+    if (mediaStream.current) {
+      mediaStream.current.getTracks().forEach(track => track.stop());
+      mediaStream.current = null;
+    }
+
+    if (ws.current) {
+      ws.current.close();
+      ws.current = null;
+    }
+  };
+
+  // Downsample function from current sample rate to 16kHz
+  const downsampleBuffer = (buffer, sampleRate, outSampleRate) => {
+    if (outSampleRate === sampleRate) {
+      return buffer;
+    }
+    if (outSampleRate > sampleRate) {
+      throw 'downsampling rate should be smaller than original sample rate';
+    }
+    const sampleRateRatio = sampleRate / outSampleRate;
+    const newLength = Math.round(buffer.length / sampleRateRatio);
+    const result = new Int16Array(newLength);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+      let accum = 0, count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+        accum += buffer[i];
+        count++;
+      }
+      result[offsetResult] = Math.min(1, accum / count) * 0x7FFF; // convert to 16-bit PCM
+      offsetResult++;
+      offsetBuffer = nextOffsetBuffer;
+    }
+    return result.buffer;
+  };
 
   const connectToServer = () => {
     if (!phoneNumber) return;
     
     ws.current = new WebSocket('ws://localhost:8080');
+    ws.current.binaryType = 'arraybuffer';
     
     ws.current.onopen = () => {
       console.log('Connected to signaling server');
@@ -63,232 +104,134 @@ function App() {
     };
     
     ws.current.onmessage = async (event) => {
-      const data = JSON.parse(event.data);
-      
-      switch (data.type) {
-        case 'incomingCall':
-          setIncomingCall({
-            from: data.from,
-            offer: data.offer
-          });
-          setRemoteLanguage(data.fromLanguage);
-          setCallStatus('incoming');
-          break;
-          
-        case 'callAnswered':
-          await pc.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-          setRemoteLanguage(data.responderLanguage);
-          setCallStatus('connected');
-          startAudioProcessing();
-          break;
-          
-        case 'iceCandidate':
-          try {
-            await pc.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-          } catch (e) {
-            console.error('Error adding ICE candidate', e);
-          }
-          break;
-          
-        case 'callEnded':
-          endCall();
-          break;
-          
-        case 'callFailed':
-          alert(data.message);
-          setCallStatus('disconnected');
-          break;
-          
-        case 'translatedAudio':
-          playTranslatedAudio(new Uint8Array(data.audioData));
-          break;
+      // Check if it's binary data (translated audio)
+      if (event.data instanceof ArrayBuffer) {
+        playAudio(event.data);
+        return;
+      }
+
+      // Handle JSON messages
+      try {
+        const data = JSON.parse(event.data);
+        
+        switch (data.type) {
+          case 'incomingCall':
+            setIncomingCall({
+              from: data.from
+            });
+            setRemoteLanguage(data.fromLanguage);
+            setCallStatus('incoming');
+            break;
+            
+          case 'callAnswered':
+            setRemoteLanguage(data.responderLanguage);
+            setCallStatus('connected');
+            startAudioCapture();
+            break;
+            
+          case 'callEnded':
+            endCall();
+            break;
+            
+          case 'callFailed':
+            alert(data.message);
+            setCallStatus('disconnected');
+            break;
+        }
+      } catch (error) {
+        console.error('Error parsing message:', error);
       }
     };
     
     ws.current.onclose = () => {
       console.log('Disconnected from signaling server');
+      setIsConnected(false);
+      cleanup();
+    };
+
+    ws.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
     };
   };
 
-  
-
-  const startAudioProcessing = async () => {
+  const startAudioCapture = async () => {
     try {
-      audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
+      // Request microphone access
+      mediaStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      // Setup media recorder to capture audio chunks
-      mediaRecorder.current = new MediaRecorder(localStream.current);
-      mediaRecorder.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          event.data.arrayBuffer().then(buffer => {
-            ws.current.send(JSON.stringify({
-              type: 'audioChunk',
-              chunk: Array.from(new Uint8Array(buffer))
-            }));
-          });
+      audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
+
+      if (audioContext.current.sampleRate !== 16000) {
+        console.warn(`AudioContext sample rate is ${audioContext.current.sampleRate}Hz, audio will be downsampled to 16000Hz before sending.`);
+      }
+
+      sourceNode.current = audioContext.current.createMediaStreamSource(mediaStream.current);
+
+      // Create ScriptProcessorNode for audio processing
+      processorNode.current = audioContext.current.createScriptProcessor(4096, 1, 1);
+
+      sourceNode.current.connect(processorNode.current);
+      processorNode.current.connect(audioContext.current.destination);
+
+      processorNode.current.onaudioprocess = (event) => {
+        const inputBuffer = event.inputBuffer.getChannelData(0);
+        const downsampledBuffer = downsampleBuffer(inputBuffer, audioContext.current.sampleRate, 16000);
+
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+          ws.current.send(downsampledBuffer);
         }
       };
-      mediaRecorder.current.start(100); // Collect 100ms chunks
     } catch (error) {
-      console.error('Error setting up audio processing:', error);
+      console.error('Error starting audio capture:', error);
+      alert('Microphone access denied or error: ' + error.message);
     }
   };
 
-  const playTranslatedAudio = (audioData) => {
+  // Play received audio from backend using AudioContext
+  const playAudio = (arrayBuffer) => {
     if (!audioContext.current) {
       audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
     }
-    
-    audioContext.current.decodeAudioData(audioData.buffer).then(buffer => {
-      if (audioBufferSource.current) {
-        audioBufferSource.current.stop();
-      }
-      
-      audioBufferSource.current = audioContext.current.createBufferSource();
-      audioBufferSource.current.buffer = buffer;
-      audioBufferSource.current.connect(audioContext.current.destination);
-      audioBufferSource.current.start(0);
-    }).catch(error => {
-      console.error('Error decoding translated audio:', error);
+    audioContext.current.decodeAudioData(arrayBuffer).then((buffer) => {
+      const playbackSource = audioContext.current.createBufferSource();
+      playbackSource.buffer = buffer;
+      playbackSource.connect(audioContext.current.destination);
+      playbackSource.start();
+    }).catch(e => {
+      console.error('Error decoding audio data:', e);
     });
   };
 
-  const startCall = async () => {
+  const startCall = () => {
     if (!remotePhoneNumber || !ws.current) return;
     
-    try {
-      setCallStatus('calling');
-      
-      // Get local audio stream
-      localStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localAudioRef.current.srcObject = localStream.current;
-      
-      // Create peer connection
-      pc.current = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-        ]
-      });
-      
-      // Add local stream to connection
-      localStream.current.getTracks().forEach(track => {
-        pc.current.addTrack(track, localStream.current);
-      });
-      
-      // Set up ICE candidate handler
-      pc.current.onicecandidate = (event) => {
-        if (event.candidate) {
-          ws.current.send(JSON.stringify({
-            type: 'iceCandidate',
-            to: remotePhoneNumber,
-            candidate: event.candidate
-          }));
-        }
-      };
-      
-      // Set up remote stream handler
-      pc.current.ontrack = (event) => {
-        remoteAudioRef.current.srcObject = event.streams[0];
-      };
-      
-      // Create offer
-      const offer = await pc.current.createOffer();
-      await pc.current.setLocalDescription(offer);
-      
-      // Send offer to the other peer
-      ws.current.send(JSON.stringify({
-        type: 'call',
-        from: phoneNumber,
-        to: remotePhoneNumber,
-        offer: offer,
-        language: language
-      }));
-      
-    } catch (error) {
-      console.error('Error starting call:', error);
-      endCall();
-    }
+    setCallStatus('calling');
+    
+    ws.current.send(JSON.stringify({
+      type: 'call',
+      from: phoneNumber,
+      to: remotePhoneNumber,
+      language: language
+    }));
   };
   
-  const answerCall = async () => {
+  const answerCall = () => {
     if (!incomingCall || !ws.current) return;
     
-    try {
-      setCallStatus('connecting');
-      
-      // Get local audio stream
-      localStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localAudioRef.current.srcObject = localStream.current;
-      
-      // Create peer connection
-      pc.current = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-        ]
-      });
-      
-      // Add local stream to connection
-      localStream.current.getTracks().forEach(track => {
-        pc.current.addTrack(track, localStream.current);
-      });
-      
-      // Set up ICE candidate handler
-      pc.current.onicecandidate = (event) => {
-        if (event.candidate) {
-          ws.current.send(JSON.stringify({
-            type: 'iceCandidate',
-            to: incomingCall.from,
-            candidate: event.candidate
-          }));
-        }
-      };
-      
-      // Set up remote stream handler
-      pc.current.ontrack = (event) => {
-        remoteAudioRef.current.srcObject = event.streams[0];
-      };
-      
-      // Set remote description
-      await pc.current.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
-      
-      // Create answer
-      const answer = await pc.current.createAnswer();
-      await pc.current.setLocalDescription(answer);
-      
-      // Send answer to the other peer
-      ws.current.send(JSON.stringify({
-        type: 'answer',
-        to: incomingCall.from,
-        answer: answer,
-        language: language
-      }));
-      
-      setCallStatus('connected');
-      setIncomingCall(null);
-      startAudioProcessing();
-      
-    } catch (error) {
-      console.error('Error answering call:', error);
-      endCall();
-    }
+    setCallStatus('connecting');
+    
+    ws.current.send(JSON.stringify({
+      type: 'answer',
+      to: incomingCall.from,
+      language: language
+    }));
+    
+    setCallStatus('connected');
+    setIncomingCall(null);
+    startAudioCapture();
   };
   
   const endCall = () => {
-    if (pc.current) {
-      pc.current.close();
-      pc.current = null;
-    }
-    
-    if (localStream.current) {
-      localStream.current.getTracks().forEach(track => track.stop());
-      localStream.current = null;
-    }
-    
-    if (mediaRecorder.current) {
-      mediaRecorder.current.stop();
-      mediaRecorder.current = null;
-    }
-    
     if (ws.current && remotePhoneNumber) {
       ws.current.send(JSON.stringify({
         type: 'endCall',
@@ -296,10 +239,9 @@ function App() {
       }));
     }
     
+    cleanup();
     setCallStatus('disconnected');
     setIncomingCall(null);
-    localAudioRef.current.srcObject = null;
-    remoteAudioRef.current.srcObject = null;
   };
   
   const rejectCall = () => {
@@ -308,75 +250,195 @@ function App() {
   };
 
   return (
-    <div className="app">
-      <h1>Web Call Service with Translation</h1>
+    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
+      <h1 style={{ color: '#333', textAlign: 'center' }}>Web Call Service with Translation</h1>
       
       {!isConnected ? (
-        <div className="connect-form">
-          <input
-            type="text"
-            placeholder="Enter your phone number"
-            value={phoneNumber}
-            onChange={(e) => setPhoneNumber(e.target.value)}
-          />
-          <select
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
+        <div style={{ maxWidth: '400px', margin: '0 auto', textAlign: 'center' }}>
+          <div style={{ marginBottom: '15px' }}>
+            <input
+              type="text"
+              placeholder="Enter your phone number"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              style={{
+                padding: '10px',
+                width: '100%',
+                marginBottom: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '16px'
+              }}
+            />
+          </div>
+          <div style={{ marginBottom: '15px' }}>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              style={{
+                padding: '10px',
+                width: '100%',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '16px'
+              }}
+            >
+              {LANGUAGES.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button 
+            onClick={connectToServer}
+            style={{
+              padding: '12px 24px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              fontSize: '16px',
+              cursor: 'pointer'
+            }}
           >
-            {LANGUAGES.map((lang) => (
-              <option key={lang.code} value={lang.code}>
-                {lang.name}
-              </option>
-            ))}
-          </select>
-          <button onClick={connectToServer}>Connect</button>
+            Connect
+          </button>
         </div>
       ) : (
-        <div className="call-container">
-          <div className="status">Status: {callStatus}</div>
-          <div className="my-number">Your number: {phoneNumber} ({LANGUAGES.find(l => l.code === language)?.name})</div>
+        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+          <div style={{ 
+            padding: '15px', 
+            backgroundColor: '#f8f9fa', 
+            borderRadius: '4px', 
+            marginBottom: '20px',
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '5px' }}>
+              Status: <span style={{ color: callStatus === 'connected' ? '#28a745' : '#007bff' }}>
+                {callStatus}
+              </span>
+            </div>
+            <div>Your number: {phoneNumber} ({LANGUAGES.find(l => l.code === language)?.name})</div>
+          </div>
           
           {callStatus === 'disconnected' && (
-            <div className="call-form">
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
               <input
                 type="text"
                 placeholder="Enter phone number to call"
                 value={remotePhoneNumber}
                 onChange={(e) => setRemotePhoneNumber(e.target.value)}
+                style={{
+                  padding: '10px',
+                  width: '70%',
+                  marginRight: '10px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  fontSize: '16px'
+                }}
               />
-              <button onClick={startCall} className="call-button">
-                <i className="fas fa-phone"></i> Call
+              <button 
+                onClick={startCall}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#28a745',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '16px',
+                  cursor: 'pointer'
+                }}
+              >
+                📞 Call
               </button>
             </div>
           )}
           
           {callStatus === 'incoming' && incomingCall && (
-            <div className="incoming-call">
-              <p>Incoming call from: {incomingCall.from} ({LANGUAGES.find(l => l.code === remoteLanguage)?.name})</p>
-              <button onClick={answerCall} className="answer-button">
-                <i className="fas fa-phone"></i> Answer
+            <div style={{ 
+              padding: '20px', 
+              backgroundColor: '#fff3cd', 
+              borderRadius: '4px', 
+              textAlign: 'center',
+              marginBottom: '20px'
+            }}>
+              <p style={{ fontSize: '18px', marginBottom: '15px' }}>
+                Incoming call from: <strong>{incomingCall.from}</strong><br/>
+                Language: {LANGUAGES.find(l => l.code === remoteLanguage)?.name}
+              </p>
+              <button 
+                onClick={answerCall}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#28a745',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '16px',
+                  cursor: 'pointer',
+                  marginRight: '10px'
+                }}
+              >
+                📞 Answer
               </button>
-              <button onClick={rejectCall} className="reject-button">
-                <i className="fas fa-phone-slash"></i> Reject
+              <button 
+                onClick={rejectCall}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '16px',
+                  cursor: 'pointer'
+                }}
+              >
+                📵 Reject
               </button>
             </div>
           )}
           
           {(callStatus === 'calling' || callStatus === 'connecting' || callStatus === 'connected') && (
-            <div className="call-controls">
-              <div className="language-info">
-                Translating from {LANGUAGES.find(l => l.code === language)?.name} to {LANGUAGES.find(l => l.code === remoteLanguage)?.name}
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ 
+                padding: '15px', 
+                backgroundColor: '#d4edda', 
+                borderRadius: '4px', 
+                marginBottom: '15px' 
+              }}>
+                <strong>Translation Active:</strong><br/>
+                {LANGUAGES.find(l => l.code === language)?.name} ↔ {LANGUAGES.find(l => l.code === remoteLanguage)?.name}
               </div>
-              <button onClick={endCall} className="end-call-button">
-                <i className="fas fa-phone-slash"></i> End Call
+              
+              {callStatus === 'connected' && (
+                <div style={{ 
+                  padding: '10px', 
+                  backgroundColor: '#d1ecf1', 
+                  borderRadius: '4px', 
+                  marginBottom: '15px',
+                  fontSize: '14px'
+                }}>
+                  🎤 Speak now - your voice is being translated in real-time
+                </div>
+              )}
+              
+              <button 
+                onClick={endCall}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '16px',
+                  cursor: 'pointer'
+                }}
+              >
+                📵 End Call
               </button>
             </div>
           )}
-          
-          <div className="audio-containers">
-            <audio ref={localAudioRef} autoPlay muted />
-            <audio ref={remoteAudioRef} autoPlay />
-          </div>
         </div>
       )}
     </div>
