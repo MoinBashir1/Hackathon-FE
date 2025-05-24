@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 
+// Google Fonts import for Inter
+const fontLink = document.createElement('link');
+fontLink.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap';
+fontLink.rel = 'stylesheet';
+document.head.appendChild(fontLink);
+
 // Supported languages
 const LANGUAGES = [
   { code: 'en-US', name: 'English' },
@@ -7,6 +13,165 @@ const LANGUAGES = [
   { code: 'ta-IN', name: 'Tamil' },
   { code: 'kn-IN', name: 'Kannada' }
 ];
+
+// Common styles
+const styles = {
+  bg: {
+    minHeight: '100vh',
+    minWidth: '100vw',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'linear-gradient(120deg, #e0e7ff 0%, #f8fafc 100%)',
+    fontFamily: 'Inter, sans-serif',
+  },
+  card: {
+    background: '#fff',
+    borderRadius: '18px',
+    boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.10)',
+    padding: '2.5rem 2rem',
+    width: '100%',
+    maxWidth: '400px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1.5rem',
+    alignItems: 'center',
+  },
+  logo: {
+    width: '48px',
+    height: '48px',
+    marginBottom: '0.5rem',
+    color: '#2563eb',
+  },
+  title: {
+    fontSize: '2rem',
+    fontWeight: 700,
+    color: '#22223b',
+    marginBottom: '0.25rem',
+    textAlign: 'center',
+    letterSpacing: '-1px',
+  },
+  subtitle: {
+    fontSize: '1rem',
+    color: '#64748b',
+    marginBottom: '0.5rem',
+    textAlign: 'center',
+  },
+  input: {
+    width: '100%',
+    padding: '0.75rem 1rem',
+    fontSize: '1rem',
+    border: '1.5px solid #e5e7eb',
+    borderRadius: '8px',
+    background: '#f8fafc',
+    color: '#22223b',
+    outline: 'none',
+    marginBottom: '0.5rem',
+    transition: 'border 0.2s',
+  },
+  select: {
+    width: '100%',
+    padding: '0.75rem 1rem',
+    fontSize: '1rem',
+    border: '1.5px solid #e5e7eb',
+    borderRadius: '8px',
+    background: '#f8fafc',
+    color: '#22223b',
+    outline: 'none',
+    marginBottom: '0.5rem',
+    transition: 'border 0.2s',
+  },
+  button: {
+    width: '100%',
+    padding: '0.75rem 0',
+    fontSize: '1.05rem',
+    fontWeight: 600,
+    borderRadius: '8px',
+    border: 'none',
+    background: 'linear-gradient(90deg, #2563eb 0%, #38bdf8 100%)',
+    color: '#fff',
+    cursor: 'pointer',
+    boxShadow: '0 2px 8px 0 rgba(56,189,248,0.08)',
+    transition: 'background 0.2s, transform 0.1s',
+    marginTop: '0.5rem',
+  },
+  buttonDanger: {
+    background: 'linear-gradient(90deg, #ef4444 0%, #f87171 100%)',
+  },
+  buttonSuccess: {
+    background: 'linear-gradient(90deg, #22c55e 0%, #4ade80 100%)',
+  },
+  status: {
+    fontSize: '1.1rem',
+    fontWeight: 600,
+    color: '#2563eb',
+    marginBottom: '0.5rem',
+    textAlign: 'center',
+  },
+  info: {
+    fontSize: '0.95rem',
+    color: '#64748b',
+    marginBottom: '0.5rem',
+    textAlign: 'center',
+  },
+  translation: {
+    background: '#f1f5f9',
+    borderRadius: '8px',
+    padding: '0.75rem',
+    fontSize: '0.98rem',
+    color: '#2563eb',
+    marginBottom: '0.5rem',
+    textAlign: 'center',
+  },
+  incoming: {
+    background: '#fef9c3',
+    border: '1px solid #fde68a',
+    borderRadius: '8px',
+    padding: '1rem',
+    marginBottom: '0.5rem',
+    textAlign: 'center',
+    color: '#b45309',
+    fontWeight: 600,
+  },
+  callInputRow: {
+    display: 'flex',
+    width: '100%',
+    gap: '0.5rem',
+    marginBottom: '0.5rem',
+  },
+  callInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  callButton: {
+    minWidth: '90px',
+  },
+  ringingAnimation: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '0.5rem',
+    marginBottom: '1rem',
+  },
+  ringDot: {
+    width: '12px',
+    height: '12px',
+    borderRadius: '50%',
+    background: '#2563eb',
+    animation: 'ring 1.5s infinite',
+  },
+  '@keyframes ring': {
+    '0%': { transform: 'scale(0.8)', opacity: 0.5 },
+    '50%': { transform: 'scale(1.2)', opacity: 1 },
+    '100%': { transform: 'scale(0.8)', opacity: 0.5 },
+  },
+  callTimer: {
+    fontSize: '1.2rem',
+    fontWeight: 600,
+    color: '#22c55e',
+    marginBottom: '1rem',
+  },
+};
 
 function App() {
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -16,12 +181,14 @@ function App() {
   const [remotePhoneNumber, setRemotePhoneNumber] = useState('');
   const [incomingCall, setIncomingCall] = useState(null);
   const [remoteLanguage, setRemoteLanguage] = useState('en-US');
+  const [callDuration, setCallDuration] = useState(0);
   
   const ws = useRef(null);
   const audioContext = useRef(null);
   const mediaStream = useRef(null);
   const sourceNode = useRef(null);
   const processorNode = useRef(null);
+  const timerRef = useRef(null);
 
   useEffect(() => {
     return () => {
@@ -58,6 +225,8 @@ function App() {
       ws.current.close();
       ws.current = null;
     }
+
+    stopCallTimer();
   };
 
   // Downsample function from current sample rate to 16kHz
@@ -127,6 +296,7 @@ function App() {
             setRemoteLanguage(data.responderLanguage);
             setCallStatus('connected');
             startAudioCapture();
+            startCallTimer();
             break;
             
           case 'callEnded':
@@ -215,6 +385,27 @@ function App() {
     }));
   };
   
+  const startCallTimer = () => {
+    setCallDuration(0);
+    timerRef.current = setInterval(() => {
+      setCallDuration(prev => prev + 1);
+    }, 1000);
+  };
+
+  const stopCallTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setCallDuration(0);
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const answerCall = () => {
     if (!incomingCall || !ws.current) return;
     
@@ -229,6 +420,7 @@ function App() {
     setCallStatus('connected');
     setIncomingCall(null);
     startAudioCapture();
+    startCallTimer();
   };
   
   const endCall = () => {
@@ -250,197 +442,91 @@ function App() {
   };
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-      <h1 style={{ color: '#333', textAlign: 'center' }}>Web Call Service with Translation</h1>
-      
-      {!isConnected ? (
-        <div style={{ maxWidth: '400px', margin: '0 auto', textAlign: 'center' }}>
-          <div style={{ marginBottom: '15px' }}>
+    <div style={styles.bg}>
+      <div style={styles.card}>
+        {/* Logo/Icon */}
+        <svg style={styles.logo} viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="22" fill="#e0e7ff" stroke="#2563eb" strokeWidth="2"/><path d="M16 32c0-4 8-4 8-8s-8-4-8-8" stroke="#2563eb" strokeWidth="2" strokeLinecap="round"/><circle cx="32" cy="24" r="4" fill="#2563eb"/></svg>
+        <div style={styles.title}>Web Call Service <span style={{color:'#2563eb'}}>with Translation</span></div>
+        <div style={styles.subtitle}>Call anyone, speak your language, get real-time translation.</div>
+        {!isConnected ? (
+          <>
             <input
               type="text"
               placeholder="Enter your phone number"
               value={phoneNumber}
               onChange={(e) => setPhoneNumber(e.target.value)}
-              style={{
-                padding: '10px',
-                width: '100%',
-                marginBottom: '10px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '16px'
-              }}
+              style={styles.input}
+              autoFocus
             />
-          </div>
-          <div style={{ marginBottom: '15px' }}>
             <select
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
-              style={{
-                padding: '10px',
-                width: '100%',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '16px'
-              }}
+              style={styles.select}
             >
               {LANGUAGES.map((lang) => (
-                <option key={lang.code} value={lang.code}>
-                  {lang.name}
-                </option>
+                <option key={lang.code} value={lang.code}>{lang.name}</option>
               ))}
             </select>
-          </div>
-          <button 
-            onClick={connectToServer}
-            style={{
-              padding: '12px 24px',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '16px',
-              cursor: 'pointer'
-            }}
-          >
-            Connect
-          </button>
-        </div>
-      ) : (
-        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-          <div style={{ 
-            padding: '15px', 
-            backgroundColor: '#f8f9fa', 
-            borderRadius: '4px', 
-            marginBottom: '20px',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '5px' }}>
-              Status: <span style={{ color: callStatus === 'connected' ? '#28a745' : '#007bff' }}>
-                {callStatus}
-              </span>
-            </div>
-            <div>Your number: {phoneNumber} ({LANGUAGES.find(l => l.code === language)?.name})</div>
-          </div>
-          
-          {callStatus === 'disconnected' && (
-            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-              <input
-                type="text"
-                placeholder="Enter phone number to call"
-                value={remotePhoneNumber}
-                onChange={(e) => setRemotePhoneNumber(e.target.value)}
-                style={{
-                  padding: '10px',
-                  width: '70%',
-                  marginRight: '10px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '16px'
-                }}
-              />
-              <button 
-                onClick={startCall}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: '#28a745',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  cursor: 'pointer'
-                }}
-              >
-                📞 Call
-              </button>
-            </div>
-          )}
-          
-          {callStatus === 'incoming' && incomingCall && (
-            <div style={{ 
-              padding: '20px', 
-              backgroundColor: '#fff3cd', 
-              borderRadius: '4px', 
-              textAlign: 'center',
-              marginBottom: '20px'
-            }}>
-              <p style={{ fontSize: '18px', marginBottom: '15px' }}>
-                Incoming call from: <strong>{incomingCall.from}</strong><br/>
-                Language: {LANGUAGES.find(l => l.code === remoteLanguage)?.name}
-              </p>
-              <button 
-                onClick={answerCall}
-                style={{
-                  padding: '12px 24px',
-                  backgroundColor: '#28a745',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  cursor: 'pointer',
-                  marginRight: '10px'
-                }}
-              >
-                📞 Answer
-              </button>
-              <button 
-                onClick={rejectCall}
-                style={{
-                  padding: '12px 24px',
-                  backgroundColor: '#dc3545',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  cursor: 'pointer'
-                }}
-              >
-                📵 Reject
-              </button>
-            </div>
-          )}
-          
-          {(callStatus === 'calling' || callStatus === 'connecting' || callStatus === 'connected') && (
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ 
-                padding: '15px', 
-                backgroundColor: '#d4edda', 
-                borderRadius: '4px', 
-                marginBottom: '15px' 
-              }}>
-                <strong>Translation Active:</strong><br/>
-                {LANGUAGES.find(l => l.code === language)?.name} ↔ {LANGUAGES.find(l => l.code === remoteLanguage)?.name}
-              </div>
-              
-              {callStatus === 'connected' && (
-                <div style={{ 
-                  padding: '10px', 
-                  backgroundColor: '#d1ecf1', 
-                  borderRadius: '4px', 
-                  marginBottom: '15px',
-                  fontSize: '14px'
-                }}>
-                  🎤 Speak now - your voice is being translated in real-time
+            <button onClick={connectToServer} style={styles.button}>Connect</button>
+          </>
+        ) : (
+          <>
+            <div style={styles.status}>Status: {callStatus.charAt(0).toUpperCase() + callStatus.slice(1)}</div>
+            <div style={styles.info}>Your number: <b>{phoneNumber}</b> ({LANGUAGES.find(l => l.code === language)?.name})</div>
+            {callStatus === 'disconnected' && (
+              <>
+                <input
+                  type="text"
+                  placeholder="Enter phone number to call"
+                  value={remotePhoneNumber}
+                  onChange={(e) => setRemotePhoneNumber(e.target.value)}
+                  style={styles.input}
+                />
+                <button onClick={startCall} style={{...styles.button, ...styles.buttonSuccess, marginTop:'0.5rem'}}>📞 Call</button>
+              </>
+            )}
+            {callStatus === 'incoming' && incomingCall && (
+              <div style={styles.incoming}>
+                <div style={styles.ringingAnimation}>
+                  <div style={styles.ringDot}></div>
+                  <div style={styles.ringDot}></div>
+                  <div style={styles.ringDot}></div>
                 </div>
-              )}
-              
-              <button 
-                onClick={endCall}
-                style={{
-                  padding: '12px 24px',
-                  backgroundColor: '#dc3545',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  cursor: 'pointer'
-                }}
-              >
-                📵 End Call
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+                Incoming call from: <b>{incomingCall.from}</b><br/>
+                Language: {LANGUAGES.find(l => l.code === remoteLanguage)?.name}<br/>
+                <div style={{display:'flex',gap:'0.5rem',marginTop:'0.75rem',justifyContent:'center'}}>
+                  <button onClick={answerCall} style={{...styles.button, ...styles.buttonSuccess, width:'auto'}}>📞 Answer</button>
+                  <button onClick={rejectCall} style={{...styles.button, ...styles.buttonDanger, width:'auto'}}>📵 Reject</button>
+                </div>
+              </div>
+            )}
+            {(callStatus === 'calling' || callStatus === 'connecting' || callStatus === 'connected') && (
+              <>
+                {callStatus === 'calling' && (
+                  <div style={styles.ringingAnimation}>
+                    <div style={styles.ringDot}></div>
+                    <div style={styles.ringDot}></div>
+                    <div style={styles.ringDot}></div>
+                  </div>
+                )}
+                {callStatus === 'connected' && (
+                  <div style={styles.callTimer}>
+                    {formatTime(callDuration)}
+                  </div>
+                )}
+                <div style={styles.translation}>
+                  <b>Translation Active:</b><br/>
+                  {LANGUAGES.find(l => l.code === language)?.name} ↔ {LANGUAGES.find(l => l.code === remoteLanguage)?.name}
+                </div>
+                {callStatus === 'connected' && (
+                  <div style={{...styles.info, color:'#22c55e',fontWeight:600}}>🎤 Speak now - your voice is being translated in real-time</div>
+                )}
+                <button onClick={endCall} style={{...styles.button, ...styles.buttonDanger}}>📵 End Call</button>
+              </>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
