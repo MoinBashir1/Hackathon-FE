@@ -146,6 +146,31 @@ const styles = {
   callButton: {
     minWidth: '90px',
   },
+  ringingAnimation: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '0.5rem',
+    marginBottom: '1rem',
+  },
+  ringDot: {
+    width: '12px',
+    height: '12px',
+    borderRadius: '50%',
+    background: '#2563eb',
+    animation: 'ring 1.5s infinite',
+  },
+  '@keyframes ring': {
+    '0%': { transform: 'scale(0.8)', opacity: 0.5 },
+    '50%': { transform: 'scale(1.2)', opacity: 1 },
+    '100%': { transform: 'scale(0.8)', opacity: 0.5 },
+  },
+  callTimer: {
+    fontSize: '1.2rem',
+    fontWeight: 600,
+    color: '#22c55e',
+    marginBottom: '1rem',
+  },
 };
 
 function App() {
@@ -156,12 +181,14 @@ function App() {
   const [remotePhoneNumber, setRemotePhoneNumber] = useState('');
   const [incomingCall, setIncomingCall] = useState(null);
   const [remoteLanguage, setRemoteLanguage] = useState('en-US');
+  const [callDuration, setCallDuration] = useState(0);
   
   const ws = useRef(null);
   const audioContext = useRef(null);
   const mediaStream = useRef(null);
   const sourceNode = useRef(null);
   const processorNode = useRef(null);
+  const timerRef = useRef(null);
 
   useEffect(() => {
     return () => {
@@ -198,6 +225,8 @@ function App() {
       ws.current.close();
       ws.current = null;
     }
+
+    stopCallTimer();
   };
 
   // Downsample function from current sample rate to 16kHz
@@ -267,6 +296,7 @@ function App() {
             setRemoteLanguage(data.responderLanguage);
             setCallStatus('connected');
             startAudioCapture();
+            startCallTimer();
             break;
             
           case 'callEnded':
@@ -355,6 +385,27 @@ function App() {
     }));
   };
   
+  const startCallTimer = () => {
+    setCallDuration(0);
+    timerRef.current = setInterval(() => {
+      setCallDuration(prev => prev + 1);
+    }, 1000);
+  };
+
+  const stopCallTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setCallDuration(0);
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const answerCall = () => {
     if (!incomingCall || !ws.current) return;
     
@@ -369,6 +420,7 @@ function App() {
     setCallStatus('connected');
     setIncomingCall(null);
     startAudioCapture();
+    startCallTimer();
   };
   
   const endCall = () => {
@@ -435,6 +487,11 @@ function App() {
             )}
             {callStatus === 'incoming' && incomingCall && (
               <div style={styles.incoming}>
+                <div style={styles.ringingAnimation}>
+                  <div style={styles.ringDot}></div>
+                  <div style={styles.ringDot}></div>
+                  <div style={styles.ringDot}></div>
+                </div>
                 Incoming call from: <b>{incomingCall.from}</b><br/>
                 Language: {LANGUAGES.find(l => l.code === remoteLanguage)?.name}<br/>
                 <div style={{display:'flex',gap:'0.5rem',marginTop:'0.75rem',justifyContent:'center'}}>
@@ -445,6 +502,18 @@ function App() {
             )}
             {(callStatus === 'calling' || callStatus === 'connecting' || callStatus === 'connected') && (
               <>
+                {callStatus === 'calling' && (
+                  <div style={styles.ringingAnimation}>
+                    <div style={styles.ringDot}></div>
+                    <div style={styles.ringDot}></div>
+                    <div style={styles.ringDot}></div>
+                  </div>
+                )}
+                {callStatus === 'connected' && (
+                  <div style={styles.callTimer}>
+                    {formatTime(callDuration)}
+                  </div>
+                )}
                 <div style={styles.translation}>
                   <b>Translation Active:</b><br/>
                   {LANGUAGES.find(l => l.code === language)?.name} ↔ {LANGUAGES.find(l => l.code === remoteLanguage)?.name}
